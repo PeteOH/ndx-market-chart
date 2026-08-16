@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ndx-market-chart"
+version = "0.1.0"
+description = "Interactive Nasdaq-100, TQQQ and SQQQ technical-indicator chart"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "numpy>=2.2",
+  "pandas>=2.2",
+  "plotly>=6.9.0",
+  "yfinance>=0.2.65",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.11",
+]
+
+[project.scripts]
+ndx-chart = "ndx_chart.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ndx_chart"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
