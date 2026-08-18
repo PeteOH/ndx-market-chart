@@ -53,6 +53,11 @@ def test_chart_contains_rulesets_and_new_moving_averages() -> None:
     assert "Use + Group to create nested AND/OR parentheses" in html
     assert '"version": 2' in html
     assert "Only ruleset JSON versions 1 and 2 are supported" in html
+    assert 'aria-label="ETF to trade"' in html
+    assert '"etf": "TQQQ"' in html
+    assert "ruleset.etf + ' price'" in html
+    assert '"rule_etf":"TQQQ"' in html
+    assert '"rule_etf":"SQQQ"' in html
     assert "Entry" in html
     assert "Current" in html
 
