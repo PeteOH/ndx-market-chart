@@ -50,11 +50,76 @@ The NDX panels include:
 - EMA(5)
 - RSI(2), RSI(3), RSI(14)
 - SMA slope(5), (7), (10), (20), (50), (200), and (250)
-- Chandelier Exit, ATR(14), and MACD(12,26,9)
+- Chandelier Exit, ATR(5), ATR(7), ATR(10), ATR(14), and MACD(12,26,9)
 
 Hover the information badge beside an indicator for a concise explanation.
 The ruleset editor can compare an indicator with a number or another indicator
 using `<`, `=`, `>`, `>=`, or `<=`.
+
+## Nested AND/OR rulesets
+
+Every Simple, Buy, and Sell expression starts with a root group. Each group has
+its own AND/OR selector and can contain conditions or more groups. Select
+**+ Group** to create parentheses and nest combinations to multiple levels.
+
+For example, `(a OR b) AND (c OR d)` is represented by an AND root containing
+two OR groups:
+
+```json
+{
+  "version": 2,
+  "rulesets": [
+    {
+      "name": "Nested example",
+      "type": "simple",
+      "enabled": true,
+      "color": "#51cf66",
+      "expression": {
+        "join": "AND",
+        "items": [
+          {
+            "join": "OR",
+            "items": [
+              {
+                "left": "SMA(50)",
+                "operator": ">=",
+                "right": {"type": "indicator", "value": "SMA(200)"}
+              },
+              {
+                "left": "EMA(5)",
+                "operator": ">=",
+                "right": {"type": "indicator", "value": "SMA(20)"}
+              }
+            ]
+          },
+          {
+            "join": "OR",
+            "items": [
+              {
+                "left": "RSI(14)",
+                "operator": ">=",
+                "right": {"type": "number", "value": 70}
+              },
+              {
+                "left": "ATR(5)",
+                "operator": ">=",
+                "right": {"type": "indicator", "value": "ATR(14)"}
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+For `(a AND b) OR (c AND d)`, change the root to `"join": "OR"` and each
+nested group to `"join": "AND"`. Buy/Sell rulesets use this same recursive
+group shape independently under `buy` and `sell`.
+
+**Copy JSON** now exports version 2. Existing version-1 flat rulesets remain
+importable and are automatically converted to a one-level expression.
 
 ## Automated publication
 

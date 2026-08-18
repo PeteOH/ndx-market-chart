@@ -46,8 +46,27 @@ def test_chart_contains_rulesets_and_new_moving_averages() -> None:
     assert "SMA(10)" in html
     assert "SMA slope(7)" in html
     assert "SMA slope(10)" in html
+    assert "ATR(5)" in html
+    assert "ATR(7)" in html
+    assert "ATR(10)" in html
+    assert "+ Group" in html
+    assert "Use + Group to create nested AND/OR parentheses" in html
+    assert '"version": 2' in html
+    assert "Only ruleset JSON versions 1 and 2 are supported" in html
     assert "Entry" in html
     assert "Current" in html
+
+
+def test_analysis_dataset_calculates_all_atr_periods() -> None:
+    sessions = pd.bdate_range("2026-01-02", periods=30)
+
+    result = build_analysis_dataset(_canonical_frame("NDX", sessions, 20_000.0))
+
+    for period in (5, 7, 10, 14):
+        column = f"atr_{period}"
+        assert column in result
+        assert result[column].iloc[: period - 1].isna().all()
+        assert pd.notna(result[column].iloc[period - 1])
 
 
 def _canonical_frame(series_id: str, sessions: pd.DatetimeIndex, scale: float) -> pd.DataFrame:
