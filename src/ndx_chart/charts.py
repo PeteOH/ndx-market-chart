@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ndx_chart.dataset import CHART_SLOPE_WINDOWS, CHART_SMA_WINDOWS
+from ndx_chart.dataset import ATR_PERIODS, CHART_SLOPE_WINDOWS, CHART_SMA_WINDOWS
 from ndx_chart.moving_averages import moving_average_column
 
 _SURFACE = "#f7f8f4"
@@ -35,6 +35,13 @@ _SMA_COLORS = {
     50: "#1c7ed6",
     200: "#087f5b",
     250: "#495057",
+}
+
+_ATR_COLORS = {
+    5: "#c92a2a",
+    7: "#e8590c",
+    10: "#1c7ed6",
+    14: "#7048e8",
 }
 
 _TRACE_DESCRIPTIONS = {
@@ -134,9 +141,21 @@ _TRACE_DESCRIPTIONS = {
         "One-session percentage change of SMA(250). It measures the direction and pace "
         "of the broad annual trend and is the slowest slope shown."
     ),
+    "ATR(5)": (
+        "Five-session Average True Range of NDX. It reacts fastest to volatility "
+        "changes, making short bursts visible but also producing the most noise."
+    ),
+    "ATR(7)": (
+        "Seven-session Average True Range of NDX, roughly one trading week. It "
+        "shows recent volatility with slightly more smoothing than ATR(5)."
+    ),
+    "ATR(10)": (
+        "Ten-session Average True Range of NDX, roughly two trading weeks. It "
+        "balances responsiveness with more stability than the shorter readings."
+    ),
     "ATR(14)": (
         "Fourteen-session Average True Range of NDX. It measures typical price movement "
-        "and therefore volatility, not whether price is moving up or down."
+        "using the standard lookback; ATR measures volatility, not direction."
     ),
     "MACD histogram": (
         "Difference between the MACD line and its signal line. Movement away from zero "
@@ -211,21 +230,23 @@ def build_chart_html(
 
     rule_operands = [label for items in controls.values() for label, _, _ in items]
     initial_rulesets = {
-        "version": 1,
+        "version": 2,
         "rulesets": [
             {
                 "name": "Golden cross",
                 "type": "simple",
                 "enabled": True,
                 "color": "#51cf66",
-                "join": "AND",
-                "conditions": [
-                    {
-                        "left": "SMA(50)",
-                        "operator": ">=",
-                        "right": {"type": "indicator", "value": "SMA(200)"},
-                    }
-                ],
+                "expression": {
+                    "join": "AND",
+                    "items": [
+                        {
+                            "left": "SMA(50)",
+                            "operator": ">=",
+                            "right": {"type": "indicator", "value": "SMA(200)"},
+                        }
+                    ],
+                },
             }
         ],
     }
@@ -299,10 +320,21 @@ def build_chart_html(
     .remove-button {{ padding: 6px 8px; color: {_RED}; }}
     .ruleset-join {{ display: flex; align-items: center; gap: 7px; margin: 9px 0 6px; color: {_MUTED}; font-size: .72rem; }}
     .ruleset-join select {{ width: auto; }}
-    .condition-row {{ display: grid; grid-template-columns: minmax(0, 1.3fr) 57px 82px minmax(0, 1.15fr) auto; gap: 5px; align-items: center; margin: 5px 0; }}
+    .expression-group {{ margin: 7px 0; padding: 8px; border: 1px solid {_GRID}; border-left: 3px solid {_AXIS}; border-radius: 8px; background: {_PANEL}; }}
+    .expression-group.nested {{ margin-left: 10px; background: {_SURFACE}; }}
+    .expression-header {{ display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }}
+    .expression-header .ruleset-join {{ margin: 0; }}
+    .expression-actions {{ display: flex; flex-wrap: wrap; gap: 4px; }}
+    .expression-actions button {{ padding: 4px 6px; font-size: .68rem; }}
+    .expression-items {{ min-width: 0; }}
+    .condition-row {{ display: grid; grid-template-columns: minmax(0, 1fr) 62px 31px; gap: 5px; align-items: center; margin: 7px 0; }}
     .condition-row select, .condition-row input, .ruleset-header input, .ruleset-join select {{ min-height: 31px; padding: 5px 6px; border: 1px solid {_AXIS}; border-radius: 7px; background: white; color: {_INK}; font: inherit; font-size: .72rem; }}
     .condition-row input[type="number"] {{ width: 100%; min-width: 0; }}
-    .condition-row .remove-button {{ min-width: 31px; }}
+    .condition-row [data-field="left"] {{ grid-column: 1; grid-row: 1; }}
+    .condition-row [data-field="operator"] {{ grid-column: 2; grid-row: 1; }}
+    .condition-row [data-field="rightType"] {{ grid-column: 1; grid-row: 2; }}
+    .condition-row [data-field="right"] {{ grid-column: 2 / 4; grid-row: 2; min-width: 0; width: 100%; }}
+    .condition-row .remove-button {{ grid-column: 3; grid-row: 1; min-width: 31px; }}
     .ruleset-footer {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }}
     .signal-group {{ margin-top: 9px; padding: 8px; border: 1px solid {_GRID}; border-radius: 8px; background: {_PANEL}; }}
     .signal-group-title {{ display: flex; align-items: center; gap: 6px; font-size: .76rem; font-weight: 800; }}
@@ -366,13 +398,13 @@ def build_chart_html(
       {''.join(fieldsets)}
       <section class="rules-panel" aria-labelledby="rules-title">
         <div class="rules-heading"><p class="control-title" id="rules-title">Ruleset highlights</p><button id="add-ruleset" type="button">+ Ruleset</button></div>
-        <p class="hint">Simple rulesets highlight matching periods. Buy / Sell rulesets use separate condition groups and plot green ▲ buy and red ▼ sell signals.</p>
+        <p class="hint">Simple rulesets highlight matching periods. Buy / Sell rulesets use separate expressions and plot green ▲ buy and red ▼ sell signals. Use + Group to create nested AND/OR parentheses.</p>
         <div id="rulesets"></div>
         <div class="rules-actions"><button id="copy-rules" type="button">Copy JSON</button><button id="import-rules" type="button">Import pasted JSON</button></div>
         <textarea class="rules-json" id="rules-json" aria-label="Ruleset JSON" placeholder="Copy rules here, or paste ruleset JSON to import"></textarea>
         <p class="rules-status" id="rules-status" role="status" aria-live="polite"></p>
       </section>
-      <p class="hint">Hover a selector row or focus its i badge for an indicator explanation. Mouse wheel: zoom · drag: zoom box · double-click: reset. The crosshair, date, and values for every visible trace follow your pointer through every panel, and each vertical scale fits the visible date range. Slope values are the one-session percentage change of each NDX SMA. Chandelier Exit uses the standard 22-session, 3×ATR setting.</p>
+      <p class="hint">Hover a selector row or focus its i badge for an indicator explanation. Mouse wheel: zoom · drag: zoom box · double-click: reset. The crosshair, date, and values for every visible trace follow your pointer through every panel, and each vertical scale fits the visible date range. Slope values are the one-session percentage change of each NDX SMA. Chandelier Exit uses the standard 22-session, 3×ATR setting. Every ruleset group evaluates its own AND/OR items before its parent group, so nested groups behave like parentheses.</p>
     </aside>
     <section class="chart-card" aria-label="Interactive market chart"><div id="global-crosshair" class="global-crosshair" aria-hidden="true"></div><div id="global-tooltip" class="global-tooltip" role="status" aria-live="polite"></div>{plot_html}</section>
   </main>
@@ -443,52 +475,79 @@ def build_chart_html(
     const defaultOperand = () => ruleOperands.includes('SMA(50)') ? 'SMA(50)' : ruleOperands[0];
     const defaultRightOperand = () => ruleOperands.includes('SMA(200)') ? 'SMA(200)' : ruleOperands[0];
     const blankCondition = (operator = '>=') => ({{
-      left: defaultOperand(), operator, right: {{type: 'indicator', value: defaultRightOperand()}}
+      kind: 'condition', left: defaultOperand(), operator,
+      right: {{type: 'indicator', value: defaultRightOperand()}}
     }});
+    const blankGroup = (join = 'AND', operator = '>=') => ({{
+      kind: 'group', join, items: [blankCondition(operator)]
+    }});
+    const cloneExpression = expression => JSON.parse(JSON.stringify(expression));
     const blankRuleset = () => ({{
       id: newRulesetId(), name: 'New ruleset', type: 'simple', enabled: true, color: '#74c0fc',
-      join: 'AND', conditions: [blankCondition()]
+      expression: blankGroup()
     }});
-    const normaliseConditions = (conditions, context) => {{
-      if (!Array.isArray(conditions) || !conditions.length) {{
-        throw new Error(context + ' needs at least one condition.');
+    const MAX_RULE_DEPTH = 8;
+    const MAX_RULE_NODES = 100;
+    const normaliseCondition = (condition, context, state) => {{
+      state.nodes += 1;
+      if (state.nodes > MAX_RULE_NODES) {{
+        throw new Error(context + ' exceeds the maximum of ' + MAX_RULE_NODES + ' groups and conditions.');
       }}
-      if (conditions.length > 20) throw new Error(context + ' can contain at most 20 conditions.');
-      return conditions.map((condition, conditionIndex) => {{
-        if (!condition || !ruleOperands.includes(condition.left)) {{
-          throw new Error('Condition ' + (conditionIndex + 1) + ' in ' + context + ' has an unknown left indicator.');
-        }}
-        if (!ruleOperators.includes(condition.operator)) {{
-          throw new Error('Condition ' + (conditionIndex + 1) + ' in ' + context + ' has an unsupported operator.');
-        }}
-        const right = condition.right || {{}};
-        const rightType = right.type === 'number' ? 'number' : 'indicator';
-        if (rightType === 'indicator' && !ruleOperands.includes(right.value)) {{
-          throw new Error('Condition ' + (conditionIndex + 1) + ' in ' + context + ' has an unknown right indicator.');
-        }}
-        const numericValue = Number(right.value);
-        if (rightType === 'number' && !Number.isFinite(numericValue)) {{
-          throw new Error('Condition ' + (conditionIndex + 1) + ' in ' + context + ' needs a numeric value.');
-        }}
-        return {{
-          left: condition.left,
-          operator: condition.operator,
-          right: {{type: rightType, value: rightType === 'number' ? numericValue : right.value}}
-        }};
-      }});
-    }};
-    const normaliseGroup = (group, context) => {{
-      if (!group || typeof group !== 'object') throw new Error(context + ' is invalid.');
+      if (!condition || !ruleOperands.includes(condition.left)) {{
+        throw new Error(context + ' has an unknown left indicator.');
+      }}
+      if (!ruleOperators.includes(condition.operator)) {{
+        throw new Error(context + ' has an unsupported operator.');
+      }}
+      const right = condition.right || {{}};
+      const rightType = right.type === 'number' ? 'number' : 'indicator';
+      if (rightType === 'indicator' && !ruleOperands.includes(right.value)) {{
+        throw new Error(context + ' has an unknown right indicator.');
+      }}
+      const numericValue = Number(right.value);
+      if (rightType === 'number' && !Number.isFinite(numericValue)) {{
+        throw new Error(context + ' needs a numeric value.');
+      }}
       return {{
+        kind: 'condition',
+        left: condition.left,
+        operator: condition.operator,
+        right: {{type: rightType, value: rightType === 'number' ? numericValue : right.value}}
+      }};
+    }};
+    const normaliseGroup = (group, context, depth = 0, state = {{nodes: 0}}) => {{
+      if (!group || typeof group !== 'object') throw new Error(context + ' is invalid.');
+      if (depth >= MAX_RULE_DEPTH) {{
+        throw new Error(context + ' exceeds the maximum nesting depth of ' + MAX_RULE_DEPTH + '.');
+      }}
+      state.nodes += 1;
+      if (state.nodes > MAX_RULE_NODES) {{
+        throw new Error(context + ' exceeds the maximum of ' + MAX_RULE_NODES + ' groups and conditions.');
+      }}
+      const items = Array.isArray(group.items) ? group.items : group.conditions;
+      if (!Array.isArray(items) || !items.length) throw new Error(context + ' needs at least one item.');
+      if (items.length > 20) throw new Error(context + ' can contain at most 20 direct items.');
+      return {{
+        kind: 'group',
         join: group.join === 'OR' ? 'OR' : 'AND',
-        conditions: normaliseConditions(group.conditions, context)
+        items: items.map((item, itemIndex) => {{
+          const itemContext = 'Item ' + (itemIndex + 1) + ' in ' + context;
+          const isGroup = item && typeof item === 'object' && (
+            item.kind === 'group' || Array.isArray(item.items) || Array.isArray(item.conditions)
+          );
+          return isGroup
+            ? normaliseGroup(item, itemContext, depth + 1, state)
+            : normaliseCondition(item, itemContext, state);
+        }})
       }};
     }};
     const normaliseRulesets = payload => {{
       const source = Array.isArray(payload) ? payload : payload && payload.rulesets;
       if (!Array.isArray(source)) throw new Error('Expected a rulesets array.');
-      if (payload && !Array.isArray(payload) && payload.version !== undefined && payload.version !== 1) {{
-        throw new Error('Only ruleset JSON version 1 is supported.');
+      const version = payload && !Array.isArray(payload) && payload.version !== undefined
+        ? Number(payload.version) : 1;
+      if (![1, 2].includes(version)) {{
+        throw new Error('Only ruleset JSON versions 1 and 2 are supported.');
       }}
       if (source.length > 50) throw new Error('A maximum of 50 rulesets can be imported.');
       return source.map((item, rulesetIndex) => {{
@@ -505,34 +564,39 @@ def build_chart_html(
           ruleset.buy = normaliseGroup(item.buy, 'buy rule in ruleset ' + (rulesetIndex + 1));
           ruleset.sell = normaliseGroup(item.sell, 'sell rule in ruleset ' + (rulesetIndex + 1));
         }} else {{
-          ruleset.join = item.join === 'OR' ? 'OR' : 'AND';
-          ruleset.conditions = normaliseConditions(item.conditions, 'ruleset ' + (rulesetIndex + 1));
+          ruleset.expression = normaliseGroup(
+            item.expression || item, 'ruleset ' + (rulesetIndex + 1)
+          );
         }}
         return ruleset;
       }});
     }};
-    rulesets = normaliseRulesets({{version: 1, rulesets}});
+    rulesets = normaliseRulesets({{version: 2, rulesets}});
     const optionMarkup = (values, selected) => values.map(value =>
       '<option value="' + escapeHtml(value) + '"' + (value === selected ? ' selected' : '') + '>' +
       escapeHtml(value) + '</option>'
     ).join('');
     const exportRulesets = () => ({{
-      version: 1,
+      version: 2,
       rulesets: rulesets.map(ruleset => {{
         const exported = {{
           name: ruleset.name, type: ruleset.type, enabled: ruleset.enabled, color: ruleset.color
         }};
-        const exportConditions = conditions => conditions.map(condition => ({{
-          left: condition.left,
-          operator: condition.operator,
-          right: {{type: condition.right.type, value: condition.right.value}}
-        }}));
+        const exportExpression = expression => expression.kind === 'group'
+          ? {{
+              join: expression.join,
+              items: expression.items.map(exportExpression)
+            }}
+          : {{
+              left: expression.left,
+              operator: expression.operator,
+              right: {{type: expression.right.type, value: expression.right.value}}
+            }};
         if (ruleset.type === 'buy_sell') {{
-          exported.buy = {{join: ruleset.buy.join, conditions: exportConditions(ruleset.buy.conditions)}};
-          exported.sell = {{join: ruleset.sell.join, conditions: exportConditions(ruleset.sell.conditions)}};
+          exported.buy = exportExpression(ruleset.buy);
+          exported.sell = exportExpression(ruleset.sell);
         }} else {{
-          exported.join = ruleset.join;
-          exported.conditions = exportConditions(ruleset.conditions);
+          exported.expression = exportExpression(ruleset.expression);
         }}
         return exported;
       }})
@@ -567,9 +631,10 @@ def build_chart_html(
       }});
       return spans;
     }};
-    const groupMatches = (group, targetDate) => {{
-      const results = group.conditions.map(condition => conditionMatches(condition, targetDate));
-      return group.join === 'OR' ? results.some(Boolean) : results.every(Boolean);
+    const expressionMatches = (expression, targetDate) => {{
+      if (expression.kind === 'condition') return conditionMatches(expression, targetDate);
+      const results = expression.items.map(item => expressionMatches(item, targetDate));
+      return expression.join === 'OR' ? results.some(Boolean) : results.every(Boolean);
     }};
     const applyRuleHighlights = () => {{
       const reference = traceForRuleOperand('^NDX price') || (plot._fullData || plot.data)[0];
@@ -583,7 +648,7 @@ def build_chart_html(
         let buyCount = 0;
         let sellCount = 0;
         if (ruleset.enabled && ruleset.type === 'simple' && timeline.length) {{
-          const flags = timeline.map(targetDate => groupMatches(ruleset, targetDate));
+          const flags = timeline.map(targetDate => expressionMatches(ruleset.expression, targetDate));
           matchCount = flags.filter(Boolean).length;
           const spans = matchingSpans(flags);
           spanCount = spans.length;
@@ -613,7 +678,7 @@ def build_chart_html(
           }});
         }} else if (ruleset.enabled && ruleset.type === 'buy_sell' && timeline.length) {{
           for (const signal of ['buy', 'sell']) {{
-            const flags = timeline.map(targetDate => groupMatches(ruleset[signal], targetDate));
+            const flags = timeline.map(targetDate => expressionMatches(ruleset[signal], targetDate));
             flags.forEach((matches, index) => {{
               if (!matches || (index > 0 && flags[index - 1])) return;
               const targetDate = timeline[index];
@@ -653,32 +718,50 @@ def build_chart_html(
         sellSignals: ruleSignals.filter(item => item.signal === 'sell').length
       }}));
     }};
+    const expressionRoot = (ruleset, signal = '') => signal ? ruleset[signal] : ruleset.expression;
+    const expressionAtPath = (root, path) => {{
+      if (!path) return root;
+      return path.split('.').reduce((node, index) => node.items[Number(index)], root);
+    }};
     const renderRulesets = () => {{
       rulesetsElement.innerHTML = rulesets.map(ruleset => {{
-        const conditionMarkup = (group, signal = '') => group.conditions.map((condition, conditionIndex) => {{
+        const conditionMarkup = (condition, path, signal, siblingCount) => {{
           const rightControl = condition.right.type === 'number'
             ? '<input type="number" step="any" data-field="right" value="' + escapeHtml(condition.right.value) + '" aria-label="Comparison number">'
             : '<select data-field="right" aria-label="Right indicator">' + optionMarkup(ruleOperands, condition.right.value) + '</select>';
-          return '<div class="condition-row" data-condition="' + conditionIndex + '" data-signal="' + signal + '">' +
+          return '<div class="condition-row" data-path="' + path.join('.') + '" data-signal="' + signal + '">' +
             '<select data-field="left" aria-label="Left indicator">' + optionMarkup(ruleOperands, condition.left) + '</select>' +
             '<select data-field="operator" aria-label="Operator">' + optionMarkup(ruleOperators, condition.operator) + '</select>' +
             '<select data-field="rightType" aria-label="Comparison type">' + optionMarkup(['indicator', 'number'], condition.right.type) + '</select>' +
             rightControl +
             '<button class="remove-button" type="button" data-action="remove-condition" aria-label="Remove condition"' +
-              (group.conditions.length === 1 ? ' disabled' : '') + '>×</button></div>';
-        }}).join('');
+              (siblingCount === 1 ? ' disabled' : '') + '>×</button></div>';
+        }};
+        const expressionMarkup = (group, path = [], signal = '', isRoot = true, canRemove = false) => {{
+          const items = group.items.map((item, itemIndex) => {{
+            const itemPath = path.concat(itemIndex);
+            return item.kind === 'group'
+              ? expressionMarkup(item, itemPath, signal, false, group.items.length > 1)
+              : conditionMarkup(item, itemPath, signal, group.items.length);
+          }}).join('');
+          const removeGroup = isRoot ? '' :
+            '<button class="remove-button" type="button" data-action="remove-group" aria-label="Remove nested group"' +
+              (canRemove ? '' : ' disabled') + '>× Group</button>';
+          return '<section class="expression-group ' + (isRoot ? 'root' : 'nested') + '" data-path="' + path.join('.') + '" data-signal="' + signal + '">' +
+            '<div class="expression-header"><label class="ruleset-join">Combine items with <select data-field="groupJoin" aria-label="Group join">' + optionMarkup(['AND', 'OR'], group.join) + '</select></label>' +
+            '<div class="expression-actions"><button type="button" data-action="add-condition">+ Condition</button>' +
+            '<button type="button" data-action="add-group">+ Group</button>' + removeGroup + '</div></div>' +
+            '<div class="expression-items">' + items + '</div></section>';
+        }};
         const simpleEditor = ruleset.type === 'simple'
-          ? '<label class="ruleset-join">Conditions joined by <select data-field="join" aria-label="Condition join">' + optionMarkup(['AND', 'OR'], ruleset.join) + '</select></label>' +
-            '<div class="conditions">' + conditionMarkup(ruleset) + '</div>' +
-            '<div class="ruleset-footer"><button type="button" data-action="add-condition">+ Condition</button><span class="rule-match-status" id="rule-match-' + ruleset.id + '"></span></div>'
+          ? expressionMarkup(ruleset.expression) +
+            '<div class="ruleset-footer"><span></span><span class="rule-match-status" id="rule-match-' + ruleset.id + '"></span></div>'
           : '';
         const signalEditor = signal => {{
-          const label = signal === 'buy' ? 'Buy conditions' : 'Sell conditions';
+          const label = signal === 'buy' ? 'Buy expression' : 'Sell expression';
           const arrow = signal === 'buy' ? '▲' : '▼';
           return '<section class="signal-group" data-signal="' + signal + '"><div class="signal-group-title"><span class="signal-arrow ' + signal + '">' + arrow + '</span>' + label + '</div>' +
-            '<label class="ruleset-join">Conditions joined by <select data-field="signalJoin" data-signal="' + signal + '" aria-label="' + label + ' join">' + optionMarkup(['AND', 'OR'], ruleset[signal].join) + '</select></label>' +
-            '<div class="conditions">' + conditionMarkup(ruleset[signal], signal) + '</div>' +
-            '<div class="ruleset-footer"><button type="button" data-action="add-condition" data-signal="' + signal + '">+ Condition</button></div></section>';
+            expressionMarkup(ruleset[signal], [], signal) + '</section>';
         }};
         const editor = ruleset.type === 'buy_sell'
           ? signalEditor('buy') + signalEditor('sell') + '<div class="ruleset-footer"><span></span><span class="rule-match-status" id="rule-match-' + ruleset.id + '"></span></div>'
@@ -846,23 +929,24 @@ def build_chart_html(
         if (field === 'type') {{
           if (target.value === 'buy_sell' && ruleset.type !== 'buy_sell') {{
             ruleset.type = 'buy_sell';
-            ruleset.buy = {{
-              join: ruleset.join,
-              conditions: JSON.parse(JSON.stringify(ruleset.conditions))
-            }};
-            ruleset.sell = {{join: 'AND', conditions: [blankCondition('<=')]}};
-            delete ruleset.join; delete ruleset.conditions;
+            ruleset.buy = cloneExpression(ruleset.expression);
+            ruleset.sell = blankGroup('AND', '<=');
+            delete ruleset.expression;
           }} else if (target.value === 'simple' && ruleset.type !== 'simple') {{
             ruleset.type = 'simple';
-            ruleset.join = ruleset.buy.join;
-            ruleset.conditions = JSON.parse(JSON.stringify(ruleset.buy.conditions));
+            ruleset.expression = cloneExpression(ruleset.buy);
             delete ruleset.buy; delete ruleset.sell;
           }}
           renderRulesets();
           return;
         }}
-        if (field === 'signalJoin') {{
-          ruleset[target.dataset.signal].join = target.value;
+        if (field === 'groupJoin') {{
+          const groupElement = target.closest('.expression-group');
+          const signal = groupElement.dataset.signal;
+          const group = expressionAtPath(
+            expressionRoot(ruleset, signal), groupElement.dataset.path
+          );
+          group.join = target.value;
           applyRuleHighlights();
           return;
         }}
@@ -871,8 +955,9 @@ def build_chart_html(
         return;
       }}
       const signal = conditionRow.dataset.signal;
-      const group = signal ? ruleset[signal] : ruleset;
-      const condition = group.conditions[Number(conditionRow.dataset.condition)];
+      const condition = expressionAtPath(
+        expressionRoot(ruleset, signal), conditionRow.dataset.path
+      );
       if (field === 'rightType') {{
         condition.right = target.value === 'number'
           ? {{type: 'number', value: 0}}
@@ -895,15 +980,48 @@ def build_chart_html(
       const rulesetIndex = rulesets.findIndex(item => item.id === card.dataset.ruleset);
       if (rulesetIndex < 0) return;
       const ruleset = rulesets[rulesetIndex];
-      const signal = button.dataset.signal || (button.closest('.condition-row') || {{dataset: {{}}}}).dataset.signal;
-      const group = signal ? ruleset[signal] : ruleset;
-      if (button.dataset.action === 'remove-ruleset') rulesets.splice(rulesetIndex, 1);
-      if (button.dataset.action === 'add-condition') group.conditions.push(blankCondition());
-      if (button.dataset.action === 'remove-condition') {{
-        const conditionRow = button.closest('.condition-row');
-        if (group.conditions.length > 1) {{
-          group.conditions.splice(Number(conditionRow.dataset.condition), 1);
+      if (button.dataset.action === 'remove-ruleset') {{
+        rulesets.splice(rulesetIndex, 1);
+        renderRulesets();
+        return;
+      }}
+      const groupElement = button.closest('.expression-group');
+      if (!groupElement) return;
+      const signal = groupElement.dataset.signal;
+      const root = expressionRoot(ruleset, signal);
+      const group = expressionAtPath(root, groupElement.dataset.path);
+      const countNodes = node => 1 + (node.kind === 'group'
+        ? node.items.reduce((total, item) => total + countNodes(item), 0) : 0);
+      if (button.dataset.action === 'add-condition' || button.dataset.action === 'add-group') {{
+        const addedNodes = button.dataset.action === 'add-group' ? 2 : 1;
+        const depth = groupElement.dataset.path
+          ? groupElement.dataset.path.split('.').length : 0;
+        if (group.items.length >= 20) {{
+          setRulesStatus('A group can contain at most 20 direct items.', true);
+          return;
         }}
+        if (countNodes(root) + addedNodes > MAX_RULE_NODES) {{
+          setRulesStatus('An expression can contain at most ' + MAX_RULE_NODES + ' groups and conditions.', true);
+          return;
+        }}
+        if (button.dataset.action === 'add-group' && depth >= MAX_RULE_DEPTH - 1) {{
+          setRulesStatus('An expression can contain at most ' + MAX_RULE_DEPTH + ' nested group levels.', true);
+          return;
+        }}
+        group.items.push(button.dataset.action === 'add-group' ? blankGroup() : blankCondition());
+        setRulesStatus('');
+      }}
+      if (button.dataset.action === 'remove-condition') {{
+        const path = button.closest('.condition-row').dataset.path.split('.');
+        const itemIndex = Number(path.pop());
+        const parent = expressionAtPath(root, path.join('.'));
+        if (parent.items.length > 1) parent.items.splice(itemIndex, 1);
+      }}
+      if (button.dataset.action === 'remove-group') {{
+        const path = groupElement.dataset.path.split('.');
+        const itemIndex = Number(path.pop());
+        const parent = expressionAtPath(root, path.join('.'));
+        if (parent.items.length > 1) parent.items.splice(itemIndex, 1);
       }}
       renderRulesets();
     }});
@@ -989,7 +1107,7 @@ def build_chart_figure(
     titles += [
         f"{_display_symbol(primary_symbol)} — RSI",
         f"{_display_symbol(primary_symbol)} — SMA slope",
-        f"{_display_symbol(primary_symbol)} — ATR(14)",
+        f"{_display_symbol(primary_symbol)} — ATR",
         f"{_display_symbol(primary_symbol)} — MACD(12, 26, 9)",
     ]
     base_heights = [0.24, *([0.13] * (price_rows - 1)), 0.14, 0.13, 0.10, 0.13]
@@ -1104,11 +1222,19 @@ def build_chart_figure(
     fig.update_yaxes(tickformat=".1%", title_text="1-day change", row=slope_row, col=1)
 
     atr_row = price_rows + 3
-    fig.add_trace(
-        _line(primary, "atr_14", "ATR(14)", _GOLD, category="NDX volatility", visible=True),
-        row=atr_row,
-        col=1,
-    )
+    for period in ATR_PERIODS:
+        fig.add_trace(
+            _line(
+                primary,
+                f"atr_{period}",
+                f"ATR({period})",
+                _ATR_COLORS[period],
+                category="NDX volatility",
+                visible=period == 14,
+            ),
+            row=atr_row,
+            col=1,
+        )
     fig.update_yaxes(title_text="Index points", row=atr_row, col=1)
 
     macd_row = price_rows + 4

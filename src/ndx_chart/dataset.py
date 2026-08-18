@@ -26,6 +26,7 @@ ANALYSIS_MOVING_AVERAGE_WINDOWS: tuple[int, ...] = (
 
 CHART_SMA_WINDOWS: tuple[int, ...] = (3, 5, 7, 10, 20, 50, 200, 250)
 CHART_SLOPE_WINDOWS: tuple[int, ...] = (5, 7, 10, 20, 50, 200, 250)
+ATR_PERIODS: tuple[int, ...] = (5, 7, 10, 14)
 
 EMA_CHART_SPAN = 5
 EMA_FAST_SPAN = 20
@@ -85,9 +86,10 @@ def build_analysis_dataset(
     adjusted = indicators.adjusted_high_low(ordered)
     result["adj_high"] = adjusted["adj_high"]
     result["adj_low"] = adjusted["adj_low"]
-    result["atr_14"] = indicators.average_true_range(
-        adjusted["adj_high"], adjusted["adj_low"], price
-    )
+    for period in ATR_PERIODS:
+        result[f"atr_{period}"] = indicators.average_true_range(
+            adjusted["adj_high"], adjusted["adj_low"], price, period=period
+        )
     chandelier = indicators.chandelier_exit(adjusted["adj_high"], adjusted["adj_low"], price)
     result["chandelier_long"] = chandelier["chandelier_long"]
     result["chandelier_short"] = chandelier["chandelier_short"]
