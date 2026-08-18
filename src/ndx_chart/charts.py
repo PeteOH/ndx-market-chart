@@ -235,6 +235,7 @@ def build_chart_html(
             {
                 "name": "Golden cross",
                 "type": "simple",
+                "etf": "TQQQ",
                 "enabled": True,
                 "color": "#51cf66",
                 "expression": {
@@ -315,7 +316,8 @@ def build_chart_html(
     .ruleset-enabled {{ display: grid; place-items: center; }}
     .ruleset-enabled input {{ accent-color: {_GREEN}; }}
     .ruleset-color {{ width: 34px; height: 31px; padding: 2px; border: 1px solid {_AXIS}; border-radius: 7px; background: white; cursor: pointer; }}
-    .ruleset-type {{ display: flex; align-items: center; gap: 7px; margin: 9px 0 7px; color: {_MUTED}; font-size: .72rem; }}
+    .ruleset-settings {{ display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 9px 0 7px; }}
+    .ruleset-type {{ display: flex; align-items: center; gap: 7px; color: {_MUTED}; font-size: .72rem; }}
     .ruleset-type select {{ min-height: 31px; padding: 5px 6px; border: 1px solid {_AXIS}; border-radius: 7px; background: white; color: {_INK}; font: inherit; font-size: .72rem; }}
     .remove-button {{ padding: 6px 8px; color: {_RED}; }}
     .ruleset-join {{ display: flex; align-items: center; gap: 7px; margin: 9px 0 6px; color: {_MUTED}; font-size: .72rem; }}
@@ -398,7 +400,7 @@ def build_chart_html(
       {''.join(fieldsets)}
       <section class="rules-panel" aria-labelledby="rules-title">
         <div class="rules-heading"><p class="control-title" id="rules-title">Ruleset highlights</p><button id="add-ruleset" type="button">+ Ruleset</button></div>
-        <p class="hint">Simple rulesets highlight matching periods. Buy / Sell rulesets use separate expressions and plot green ▲ buy and red ▼ sell signals. Use + Group to create nested AND/OR parentheses.</p>
+        <p class="hint">Assign each ruleset to TQQQ or SQQQ. Simple rulesets highlight matching periods and mark their entry and exit; Buy / Sell rulesets use separate expressions. Green ▲ buy and red ▼ sell arrows appear on the selected ETF chart. Use + Group to create nested AND/OR parentheses.</p>
         <div id="rulesets"></div>
         <div class="rules-actions"><button id="copy-rules" type="button">Copy JSON</button><button id="import-rules" type="button">Import pasted JSON</button></div>
         <textarea class="rules-json" id="rules-json" aria-label="Ruleset JSON" placeholder="Copy rules here, or paste ruleset JSON to import"></textarea>
@@ -422,6 +424,7 @@ def build_chart_html(
     const last = '{last_date}';
     const xAxes = {list(_xaxis_layout_keys(len(datasets) + 4))!r};
     const ruleOperands = {rule_operands_json};
+    const ruleEtfs = ['TQQQ', 'SQQQ'];
     let rulesets = {initial_rulesets_json}.rulesets;
     let nextRulesetId = 1;
     let ruleSections = [];
@@ -483,7 +486,7 @@ def build_chart_html(
     }});
     const cloneExpression = expression => JSON.parse(JSON.stringify(expression));
     const blankRuleset = () => ({{
-      id: newRulesetId(), name: 'New ruleset', type: 'simple', enabled: true, color: '#74c0fc',
+      id: newRulesetId(), name: 'New ruleset', type: 'simple', etf: 'TQQQ', enabled: true, color: '#74c0fc',
       expression: blankGroup()
     }});
     const MAX_RULE_DEPTH = 8;
@@ -557,6 +560,7 @@ def build_chart_html(
           id: newRulesetId(),
           name: String(item.name || 'Ruleset ' + (rulesetIndex + 1)).slice(0, 80),
           type,
+          etf: item.etf === 'SQQQ' ? 'SQQQ' : 'TQQQ',
           enabled: item.enabled !== false,
           color: /^#[0-9a-f]{{6}}$/i.test(item.color || '') ? item.color : '#74c0fc'
         }};
@@ -580,7 +584,8 @@ def build_chart_html(
       version: 2,
       rulesets: rulesets.map(ruleset => {{
         const exported = {{
-          name: ruleset.name, type: ruleset.type, enabled: ruleset.enabled, color: ruleset.color
+          name: ruleset.name, type: ruleset.type, etf: ruleset.etf,
+          enabled: ruleset.enabled, color: ruleset.color
         }};
         const exportExpression = expression => expression.kind === 'group'
           ? {{
@@ -636,6 +641,16 @@ def build_chart_html(
       const results = expression.items.map(item => expressionMatches(item, targetDate));
       return expression.join === 'OR' ? results.some(Boolean) : results.every(Boolean);
     }};
+    const addRuleSignal = (ruleset, signal, targetDate) => {{
+      const trace = traceForRuleOperand(ruleset.etf + ' price');
+      const value = trace ? traceValueAt(trace, targetDate) : null;
+      if (value === null) return false;
+      ruleSignals.push({{
+        rulesetId: ruleset.id, name: ruleset.name, etf: ruleset.etf,
+        signal, targetDate, value
+      }});
+      return true;
+    }};
     const applyRuleHighlights = () => {{
       const reference = traceForRuleOperand('^NDX price') || (plot._fullData || plot.data)[0];
       const timeline = reference && reference.x ? reference.x.map(dateKey) : [];
@@ -658,7 +673,7 @@ def build_chart_html(
             const shapeEnd = timeline[endIndex + 1] || new Date(
               new Date(endDate + 'T00:00:00Z').getTime() + 86400000
             ).toISOString().slice(0, 10);
-            const performance = ['TQQQ', 'SQQQ'].map(symbol => {{
+            const performance = [ruleset.etf].map(symbol => {{
               const trace = traceForRuleOperand(symbol + ' price');
               const entry = trace ? traceValueAt(trace, startDate) : null;
               const exit = trace ? traceValueAt(trace, endDate) : null;
@@ -667,9 +682,11 @@ def build_chart_html(
               return {{symbol, entry, exit, gain}};
             }});
             ruleSections.push({{
-              rulesetId: ruleset.id, name: ruleset.name, color: ruleset.color,
+              rulesetId: ruleset.id, name: ruleset.name, etf: ruleset.etf, color: ruleset.color,
               startDate, endDate, ongoing: endIndex === timeline.length - 1, performance
             }});
+            addRuleSignal(ruleset, 'buy', startDate);
+            if (endIndex !== timeline.length - 1) addRuleSignal(ruleset, 'sell', endDate);
             highlightShapes.push({{
               type: 'rect', xref: 'x', yref: 'paper', x0: startDate, x1: shapeEnd,
               y0: 0, y1: 1, fillcolor: ruleset.color, opacity: 0.18,
@@ -682,12 +699,9 @@ def build_chart_html(
             flags.forEach((matches, index) => {{
               if (!matches || (index > 0 && flags[index - 1])) return;
               const targetDate = timeline[index];
-              const value = traceValueAt(reference, targetDate);
-              if (value === null) return;
-              ruleSignals.push({{
-                rulesetId: ruleset.id, name: ruleset.name, signal, targetDate, value
-              }});
-              if (signal === 'buy') buyCount += 1; else sellCount += 1;
+              if (addRuleSignal(ruleset, signal, targetDate)) {{
+                if (signal === 'buy') buyCount += 1; else sellCount += 1;
+              }}
             }});
           }}
         }}
@@ -695,21 +709,25 @@ def build_chart_html(
         if (status) {{
           if (!ruleset.enabled) status.textContent = 'Disabled';
           else if (ruleset.type === 'buy_sell') status.textContent =
-            buyCount.toLocaleString() + ' buy · ' + sellCount.toLocaleString() + ' sell signals';
+            ruleset.etf + ' · ' + buyCount.toLocaleString() + ' buy · ' +
+            sellCount.toLocaleString() + ' sell signals';
           else status.textContent =
-            matchCount.toLocaleString() + ' sessions · ' + spanCount.toLocaleString() + ' sections';
+            ruleset.etf + ' · ' + matchCount.toLocaleString() + ' sessions · ' +
+            spanCount.toLocaleString() + ' sections';
         }}
       }});
-      const markerUpdates = ['buy', 'sell'].map(signal => {{
-        const traceIndex = plot.data.findIndex(trace => trace.meta && trace.meta.rule_signal === signal);
+      const markerUpdates = ruleEtfs.flatMap(etf => ['buy', 'sell'].map(signal => {{
+        const traceIndex = plot.data.findIndex(trace => trace.meta &&
+          trace.meta.rule_signal === signal && trace.meta.rule_etf === etf);
         if (traceIndex < 0) return Promise.resolve();
-        const signals = ruleSignals.filter(item => item.signal === signal);
+        const signals = ruleSignals.filter(item => item.signal === signal && item.etf === etf);
         return Plotly.restyle(plot, {{
           x: [signals.map(item => item.targetDate)],
           y: [signals.map(item => item.value)],
-          text: [signals.map(item => (signal === 'buy' ? '▲ Buy · ' : '▼ Sell · ') + item.name)]
+          text: [signals.map(item => (signal === 'buy' ? '▲ Buy ' : '▼ Sell ') +
+            item.etf + ' · ' + item.name)]
         }}, [traceIndex]);
-      }});
+      }}));
       markerUpdates.push(Plotly.relayout(plot, {{shapes: baseShapes.concat(highlightShapes)}}));
       return Promise.all(markerUpdates).then(() => ({{
         sessions: timeline.length,
@@ -771,7 +789,8 @@ def build_chart_html(
           '<input type="text" data-field="name" aria-label="Ruleset name" value="' + escapeHtml(ruleset.name) + '">' +
           '<input class="ruleset-color" type="color" data-field="color" aria-label="Highlight colour" title="Simple highlight colour; Buy / Sell markers use green and red" value="' + escapeHtml(ruleset.color) + '"' + (ruleset.type === 'buy_sell' ? ' disabled' : '') + '>' +
           '<button class="remove-button" type="button" data-action="remove-ruleset" aria-label="Remove ruleset">×</button></div>' +
-          '<label class="ruleset-type">Type <select data-field="type" aria-label="Ruleset type"><option value="simple"' + (ruleset.type === 'simple' ? ' selected' : '') + '>Simple highlight</option><option value="buy_sell"' + (ruleset.type === 'buy_sell' ? ' selected' : '') + '>Buy / Sell</option></select></label>' +
+          '<div class="ruleset-settings"><label class="ruleset-type">ETF <select data-field="etf" aria-label="ETF to trade">' + optionMarkup(ruleEtfs, ruleset.etf) + '</select></label>' +
+          '<label class="ruleset-type">Type <select data-field="type" aria-label="Ruleset type"><option value="simple"' + (ruleset.type === 'simple' ? ' selected' : '') + '>Simple highlight</option><option value="buy_sell"' + (ruleset.type === 'buy_sell' ? ' selected' : '') + '>Buy / Sell</option></select></label></div>' +
           editor + '</article>';
       }}).join('');
       applyRuleHighlights();
@@ -814,7 +833,7 @@ def build_chart_html(
               '<span class="gain ' + (item.gain === null ? '' : item.gain >= 0 ? 'positive' : 'negative') + '">' +
               escapeHtml(formatRuleGain(item.gain)) + '</span>').join('') + '</div>';
           return '<section class="hover-rule" style="--rule-color:' + escapeHtml(section.color) + '">' +
-            '<div class="hover-rule-name">' + escapeHtml(section.name) + '</div>' +
+            '<div class="hover-rule-name">' + escapeHtml(section.etf + ' · ' + section.name) + '</div>' +
             '<div class="hover-rule-period">' + escapeHtml(formatRuleDate(section.startDate)) + ' – ' +
             escapeHtml(formatRuleDate(section.endDate)) + (section.ongoing ? ' · active' : '') + '</div>' +
             performance + '</section>';
@@ -822,7 +841,8 @@ def build_chart_html(
       const matchingSignals = ruleSignals.filter(signal => signal.targetDate === targetDate);
       const signals = matchingSignals.length ? '<div class="hover-signals">' +
         matchingSignals.map(signal => '<div class="hover-signal ' + signal.signal + '">' +
-          (signal.signal === 'buy' ? '▲ Buy · ' : '▼ Sell · ') + escapeHtml(signal.name) +
+          (signal.signal === 'buy' ? '▲ Buy ' : '▼ Sell ') + escapeHtml(signal.etf) +
+          ' · ' + escapeHtml(signal.name) +
           '</div>').join('') + '</div>' : '';
       tooltip.innerHTML = '<div class="hover-date">' +
         escapeHtml(formatRuleDate(targetDate)) + '</div><div class="hover-groups">' + groups + '</div>' + rules + signals;
@@ -1262,29 +1282,35 @@ def build_chart_figure(
         row=macd_row,
         col=1,
     )
-    for signal, label, color, symbol in (
-        ("buy", "Buy signals", _GREEN, "triangle-up"),
-        ("sell", "Sell signals", _RED, "triangle-down"),
-    ):
-        fig.add_trace(
-            go.Scatter(
-                x=[],
-                y=[],
-                name=label,
-                mode="markers",
-                marker={
-                    "color": color,
-                    "line": {"color": _PANEL, "width": 1},
-                    "size": 14,
-                    "symbol": symbol,
-                },
-                showlegend=False,
-                meta={"rule_signal": signal},
-                hovertemplate=f"%{{text}}<br>%{{x|%Y-%m-%d}}<extra>{label}</extra>",
-            ),
-            row=1,
-            col=1,
-        )
+    symbol_rows = {symbol: row for row, symbol in enumerate(symbols, start=1)}
+    for etf in ("TQQQ", "SQQQ"):
+        if etf not in symbol_rows:
+            continue
+        for signal, label, color, marker_symbol in (
+            ("buy", "Buy signals", _GREEN, "triangle-up"),
+            ("sell", "Sell signals", _RED, "triangle-down"),
+        ):
+            fig.add_trace(
+                go.Scatter(
+                    x=[],
+                    y=[],
+                    name=f"{etf} {label.lower()}",
+                    mode="markers",
+                    marker={
+                        "color": color,
+                        "line": {"color": _PANEL, "width": 1},
+                        "size": 14,
+                        "symbol": marker_symbol,
+                    },
+                    showlegend=False,
+                    meta={"rule_signal": signal, "rule_etf": etf},
+                    hovertemplate=(
+                        f"%{{text}}<br>%{{x|%Y-%m-%d}}<extra>{etf} {label}</extra>"
+                    ),
+                ),
+                row=symbol_rows[etf],
+                col=1,
+            )
     fig.add_hline(y=0, line_width=1, line_color=_AXIS, row=macd_row, col=1)
     fig.update_yaxes(title_text="Index points", row=macd_row, col=1)
 

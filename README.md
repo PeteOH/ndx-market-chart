@@ -56,6 +56,12 @@ Hover the information badge beside an indicator for a concise explanation.
 The ruleset editor can compare an indicator with a number or another indicator
 using `<`, `=`, `>`, `>=`, or `<=`.
 
+Each ruleset also has an **ETF** selector. Choose TQQQ or SQQQ to define which
+ETF the ruleset trades. Entry and exit arrows are plotted on that ETF's price
+panel, signal hover text names it, and Simple-rule performance uses only its
+assigned ETF. Rulesets without an `etf` field (including older copied JSON)
+default to TQQQ when imported.
+
 ## Nested AND/OR rulesets
 
 Every Simple, Buy, and Sell expression starts with a root group. Each group has
@@ -72,6 +78,7 @@ two OR groups:
     {
       "name": "Nested example",
       "type": "simple",
+      "etf": "TQQQ",
       "enabled": true,
       "color": "#51cf66",
       "expression": {
